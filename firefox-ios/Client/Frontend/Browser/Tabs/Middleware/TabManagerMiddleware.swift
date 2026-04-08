@@ -119,13 +119,15 @@ final class TabManagerMiddleware: FeatureFlaggable,
             copyURL(tabID: tabUUID, uuid: action.windowUUID)
 
         case TabPeekActionType.closeTab:
-            // TODO: verify if this works for closing a tab from an unselected tab panel
             guard let tabsState = state.componentState(TabsPanelState.self,
                                                        for: .tabsPanel,
                                                        window: action.windowUUID) else { return }
-            tabPeekCloseTab(with: tabUUID,
-                            uuid: action.windowUUID,
-                            isPrivate: tabsState.isPrivateMode)
+
+            Task {
+                await tabPeekCloseTab(with: tabUUID,
+                                      uuid: action.windowUUID,
+                                      isPrivate: tabsState.isPrivateMode)
+            }
         default:
             break
         }
@@ -222,9 +224,11 @@ final class TabManagerMiddleware: FeatureFlaggable,
 
         case TabPanelViewActionType.closeTab:
             guard let tabUUID = action.tabUUID else { return }
-            closeTabFromTabPanel(with: tabUUID,
-                                 uuid: action.windowUUID,
-                                 isPrivate: action.panelType == .privateTabs)
+            Task {
+                await closeTabFromTabPanel(with: tabUUID,
+                                           uuid: action.windowUUID,
+                                           isPrivate: action.panelType == .privateTabs)
+            }
 
         case TabPanelViewActionType.undoClose:
             undoCloseTab(state: state, uuid: action.windowUUID)
@@ -236,11 +240,15 @@ final class TabManagerMiddleware: FeatureFlaggable,
             )
 
         case TabPanelViewActionType.confirmCloseAllTabs:
-            closeAllTabs(state: state, uuid: action.windowUUID)
+            Task {
+                await closeAllTabs(state: state, uuid: action.windowUUID)
+            }
 
         case TabPanelViewActionType.deleteTabsOlderThan:
             guard let period = action.deleteTabPeriod else { return }
-            deleteNormalTabsOlderThan(period: period, uuid: action.windowUUID)
+            Task {
+                await deleteNormalTabsOlderThan(period: period, uuid: action.windowUUID)
+            }
 
         case TabPanelViewActionType.undoCloseAllTabs:
             undoCloseAllTabs(uuid: action.windowUUID)
@@ -424,7 +432,7 @@ final class TabManagerMiddleware: FeatureFlaggable,
     /// - Parameters:
     ///   - tabUUID: UUID of the tab to be closed/removed
     /// - Returns: If is the last tab to be closed used to trigger dismissTabTray action
-    private func closeTab(with tabUUID: TabUUID, uuid: WindowUUID, isPrivate: Bool) -> Bool {
+    private func closeTab(with tabUUID: TabUUID, uuid: WindowUUID, isPrivate: Bool) async -> Bool {
         tabsPanelTelemetry.tabClosed(mode: isPrivate ? .private : .normal)
         let tabManager = tabManager(for: uuid)
         // In non-private mode, if:
@@ -434,14 +442,14 @@ final class TabManagerMiddleware: FeatureFlaggable,
         let isLastActiveTab = isPrivate
                             ? tabManager.privateTabs.count == 1
                             : tabManager.normalTabs.count == 1
-        tabManager.removeTab(tabUUID)
+        await tabManager.removeTab(tabUUID)
         return isLastActiveTab
     }
 
     /// Close tab and trigger refresh
     /// - Parameter tabUUID: UUID of the tab to be closed/removed
-    private func closeTabFromTabPanel(with tabUUID: TabUUID, uuid: WindowUUID, isPrivate: Bool) {
-        let shouldDismiss = self.closeTab(with: tabUUID, uuid: uuid, isPrivate: isPrivate)
+    private func closeTabFromTabPanel(with tabUUID: TabUUID, uuid: WindowUUID, isPrivate: Bool) async {
+        let shouldDismiss = await closeTab(with: tabUUID, uuid: uuid, isPrivate: isPrivate)
         triggerRefresh(uuid: uuid, isPrivate: isPrivate)
 
         if isPrivate && tabManager(for: uuid).privateTabs.isEmpty {
@@ -539,14 +547,14 @@ final class TabManagerMiddleware: FeatureFlaggable,
         store.dispatch(scrollAction)
     }
 
-    private func closeAllTabs(state: AppState, uuid: WindowUUID) {
+    private func closeAllTabs(state: AppState, uuid: WindowUUID) async {
         let tabManager = tabManager(for: uuid)
         guard let tabsState = state.componentState(TabsPanelState.self, for: .tabsPanel, window: uuid) else { return }
 
         tabsPanelTelemetry.closeAllTabsSheetOptionSelected(option: .all, mode: tabsState.isPrivateMode ? .private : .normal)
         let normalCount = tabManager.normalTabs.count
         let privateCount = tabManager.privateTabs.count
-        tabManager.removeAllTabs(isPrivateMode: tabsState.isPrivateMode)
+        await tabManager.removeAllTabs(isPrivateMode: tabsState.isPrivateMode)
 
         triggerRefresh(uuid: uuid, isPrivate: tabsState.isPrivateMode)
 
@@ -572,10 +580,10 @@ final class TabManagerMiddleware: FeatureFlaggable,
         }
     }
 
-    private func deleteNormalTabsOlderThan(period: TabsDeletionPeriod, uuid: WindowUUID) {
+    private func deleteNormalTabsOlderThan(period: TabsDeletionPeriod, uuid: WindowUUID) async {
         tabsPanelTelemetry.deleteNormalTabsSheetOptionSelected(period: period)
         let tabManager = tabManager(for: uuid)
-        tabManager.removeNormalTabsOlderThan(period: period, currentDate: .now)
+        await tabManager.removeNormalTabsOlderThan(period: period, currentDate: .now)
 
         // We are not closing the tab tray, so we need to refresh the tabs on screen
         let model = getTabsDisplayModel(for: false, uuid: uuid)
@@ -692,8 +700,8 @@ final class TabManagerMiddleware: FeatureFlaggable,
         UIPasteboard.general.url = tabManager.getTabForUUID(uuid: tabID)?.canonicalURL
     }
 
-    private func tabPeekCloseTab(with tabID: TabUUID, uuid: WindowUUID, isPrivate: Bool) {
-        closeTabFromTabPanel(with: tabID, uuid: uuid, isPrivate: isPrivate)
+    private func tabPeekCloseTab(with tabID: TabUUID, uuid: WindowUUID, isPrivate: Bool) async {
+        await closeTabFromTabPanel(with: tabID, uuid: uuid, isPrivate: isPrivate)
     }
 
     private func changePanel(_ panel: TabTrayPanelType, appState: AppState, uuid: WindowUUID) {
