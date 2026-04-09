@@ -3061,6 +3061,7 @@ class BrowserViewController: UIViewController,
             configureShowOriginalHeader(for: alert, languageCode: langCode)
         } else {
             let title: String = .Translations.LanguagePicker.Title
+            let attributedTitleKey = "attributedTitle"
             alert.title = title
             alert.setValue(
                 NSAttributedString(
@@ -3072,7 +3073,7 @@ class BrowserViewController: UIViewController,
                         )
                     ]
                 ),
-                forKey: "attributedTitle"
+                forKey: attributedTitleKey
             )
         }
 
